@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useState, memo, useCallback } from 'react';
 import clsx from 'clsx';
 import { ChevronDown } from 'lucide-react';
 import { Post } from '../../types';
@@ -19,7 +19,7 @@ const reactions = [
   { type: 'tooMuch', emoji: '🙈', label: 'Intense', labelTe: 'తీవ్రమైన' },
 ];
 
-export default function ReactionBar({ post }: ReactionBarProps) {
+function ReactionBarComponent({ post }: ReactionBarProps) {
   const { user, isAuthenticated } = useAuthStore();
   const currentLanguage = isAuthenticated ? user?.language : (localStorage.getItem('guest-language') || 'english');
   const isTeluguLang = currentLanguage === 'telugu';
@@ -36,7 +36,7 @@ export default function ReactionBar({ post }: ReactionBarProps) {
   const [isLoading, setIsLoading] = useState(false);
   const [isExpanded, setIsExpanded] = useState(false);
 
-  const handleReaction = async (reactionType: string) => {
+  const handleReaction = useCallback(async (reactionType: string) => {
     if (isLoading) return;
 
     const previousReaction = myReaction;
@@ -80,7 +80,7 @@ export default function ReactionBar({ post }: ReactionBarProps) {
     } finally {
       setIsLoading(false);
     }
-  };
+  }, [isLoading, myReaction, counts, post._id]);
 
   const totalReactions = counts ? Object.values(counts).reduce((a, b) => a + b, 0) : 0;
 
@@ -146,3 +146,24 @@ export default function ReactionBar({ post }: ReactionBarProps) {
     </div>
   );
 }
+
+// Memoize ReactionBar to prevent unnecessary re-renders
+const ReactionBar = memo(ReactionBarComponent, (prevProps, nextProps) => {
+  // Only re-render if post ID or reaction counts change
+  const prevCounts = prevProps.post.reactionCounts;
+  const nextCounts = nextProps.post.reactionCounts;
+
+  return (
+    prevProps.post._id === nextProps.post._id &&
+    prevCounts.relatable === nextCounts.relatable &&
+    prevCounts.hot === nextCounts.hot &&
+    prevCounts.feltThis === nextCounts.feltThis &&
+    prevCounts.curious === nextCounts.curious &&
+    prevCounts.sad === nextCounts.sad &&
+    prevCounts.tooMuch === nextCounts.tooMuch
+  );
+});
+
+ReactionBar.displayName = 'ReactionBar';
+
+export default ReactionBar;

@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef, useCallback } from 'react';
 
 interface LiveUsersConfig {
   min: number;
@@ -11,11 +11,16 @@ const DEFAULT_CONFIG: LiveUsersConfig = {
   max: 900,
 };
 
+// Update interval - reduced frequency to minimize re-renders
+const UPDATE_INTERVAL = 8000; // 8 seconds instead of 3-5
+
 export function useLiveUsers() {
   const [userCount, setUserCount] = useState<number>(0);
   const [config, setConfig] = useState<LiveUsersConfig>(DEFAULT_CONFIG);
+  const intervalRef = useRef<number | null>(null);
+  const isVisibleRef = useRef(true);
 
-  // Load config from localStorage
+  // Load config from localStorage - only once on mount
   useEffect(() => {
     try {
       const stored = localStorage.getItem(STORAGE_KEY);
@@ -29,37 +34,45 @@ export function useLiveUsers() {
   }, []);
 
   // Generate random number within range
-  const getRandomCount = () => {
+  const getRandomCount = useCallback(() => {
     const { min, max } = config;
     return Math.floor(Math.random() * (max - min + 1)) + min;
-  };
+  }, [config]);
 
-  // Initialize and update count
+  // Initialize and update count - optimized to reduce re-renders
   useEffect(() => {
     // Set initial count
     setUserCount(getRandomCount());
 
-    // Update count at random intervals (3-5 seconds)
-    const updateCount = () => {
-      setUserCount(getRandomCount());
-
-      // Schedule next update with random interval
-      const nextInterval = 3000 + Math.random() * 2000; // 3-5 seconds
-      setTimeout(updateCount, nextInterval);
+    // Only update when page is visible
+    const handleVisibilityChange = () => {
+      isVisibleRef.current = document.visibilityState === 'visible';
     };
+    document.addEventListener('visibilitychange', handleVisibilityChange);
 
-    const firstInterval = 3000 + Math.random() * 2000;
-    const timeoutId = setTimeout(updateCount, firstInterval);
+    // Update at fixed interval, but only when visible
+    intervalRef.current = window.setInterval(() => {
+      if (isVisibleRef.current) {
+        setUserCount(getRandomCount());
+      }
+    }, UPDATE_INTERVAL);
 
-    return () => clearTimeout(timeoutId);
-  }, [config]);
+    return () => {
+      if (intervalRef.current) {
+        clearInterval(intervalRef.current);
+      }
+      document.removeEventListener('visibilitychange', handleVisibilityChange);
+    };
+  }, [getRandomCount]);
 
   // Function to update config (for admin use later)
-  const updateConfig = (newConfig: Partial<LiveUsersConfig>) => {
-    const updated = { ...config, ...newConfig };
-    setConfig(updated);
-    localStorage.setItem(STORAGE_KEY, JSON.stringify(updated));
-  };
+  const updateConfig = useCallback((newConfig: Partial<LiveUsersConfig>) => {
+    setConfig(prev => {
+      const updated = { ...prev, ...newConfig };
+      localStorage.setItem(STORAGE_KEY, JSON.stringify(updated));
+      return updated;
+    });
+  }, []);
 
   return {
     userCount,

@@ -3,21 +3,31 @@ import { useAuthStore } from '@store/authStore';
 
 const API_BASE_URL = import.meta.env.VITE_API_URL || '/api';
 
-// Create axios instance
+// Extend axios config to include metadata for performance tracking
+declare module 'axios' {
+  interface InternalAxiosRequestConfig {
+    metadata?: { startTime: number };
+  }
+}
+
+// Create axios instance with timeout
 const api = axios.create({
   baseURL: API_BASE_URL,
   headers: {
     'Content-Type': 'application/json',
   },
+  timeout: 10000, // 10 second timeout - prevents hanging requests
 });
 
-// Request interceptor - add auth token
+// Request interceptor - add auth token and performance tracking
 api.interceptors.request.use(
   (config) => {
     const token = useAuthStore.getState().token;
     if (token) {
       config.headers.Authorization = `Bearer ${token}`;
     }
+    // Add timing metadata for performance monitoring
+    config.metadata = { startTime: Date.now() };
     return config;
   },
   (error) => {
@@ -25,14 +35,25 @@ api.interceptors.request.use(
   }
 );
 
-// Response interceptor - handle errors
+// Response interceptor - handle errors and log slow requests
 api.interceptors.response.use(
-  (response) => response,
+  (response) => {
+    // Log slow API calls in development
+    const duration = Date.now() - (response.config.metadata?.startTime || Date.now());
+    if (duration > 2000 && import.meta.env.DEV) {
+      console.warn(`[SLOW API] ${response.config.url} took ${duration}ms`);
+    }
+    return response;
+  },
   (error: AxiosError) => {
     if (error.response?.status === 401) {
       // Token expired or invalid - logout
       useAuthStore.getState().logout();
       window.location.href = '/login';
+    }
+    // Handle timeout errors gracefully
+    if (error.code === 'ECONNABORTED') {
+      console.error('[API TIMEOUT] Request timed out:', error.config?.url);
     }
     return Promise.reject(error);
   }

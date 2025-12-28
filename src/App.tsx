@@ -1,10 +1,10 @@
-import { lazy, Suspense, memo } from 'react';
+import { lazy, Suspense, memo, useEffect } from 'react';
 import { Routes, Route, Navigate } from 'react-router-dom';
 import { Toaster } from 'react-hot-toast';
 import { useAuthStore } from '@store/authStore';
 import { useAdminAuthStore } from '@store/adminAuthStore';
 
-// Loading Spinner Component for Suspense fallback
+// Loading Spinner Component for Suspense fallback - Optimized to show quickly
 const PageLoader = () => (
   <div className="min-h-screen bg-dark-950 flex items-center justify-center">
     <div className="flex flex-col items-center gap-4">
@@ -22,20 +22,36 @@ import AuthLayout from '@components/layouts/AuthLayout';
 import AuthModal from '@components/auth/AuthModal';
 
 // Lazy load all page components for code splitting
+// Store import functions for preloading
+const importFeed = () => import('@pages/Feed');
+const importPostDetail = () => import('@pages/PostDetail');
+const importCreatePost = () => import('@pages/CreatePost');
+const importSettings = () => import('@pages/Settings');
+const importMyPosts = () => import('@pages/MyPosts');
+
 const Landing = lazy(() => import('@pages/Landing'));
 const Login = lazy(() => import('@pages/auth/Login'));
 const Register = lazy(() => import('@pages/auth/Register'));
 const AgeGate = lazy(() => import('@pages/auth/AgeGate'));
-const Feed = lazy(() => import('@pages/Feed'));
-const PostDetail = lazy(() => import('@pages/PostDetail'));
-const CreatePost = lazy(() => import('@pages/CreatePost'));
-const Settings = lazy(() => import('@pages/Settings'));
-const MyPosts = lazy(() => import('@pages/MyPosts'));
+const Feed = lazy(importFeed);
+const PostDetail = lazy(importPostDetail);
+const CreatePost = lazy(importCreatePost);
+const Settings = lazy(importSettings);
+const MyPosts = lazy(importMyPosts);
 const SearchResults = lazy(() => import('@pages/SearchResults'));
 const CommunityPage = lazy(() => import('@pages/CommunityPage'));
 const Kamakadhu = lazy(() => import('@pages/Kamakadhu'));
 const Terms = lazy(() => import('@pages/Terms'));
 const NotFound = lazy(() => import('@pages/NotFound'));
+
+// Preload critical routes after initial load
+export const preloadRoutes = {
+  feed: importFeed,
+  postDetail: importPostDetail,
+  createPost: importCreatePost,
+  settings: importSettings,
+  myPosts: importMyPosts,
+};
 
 // Admin Pages - Lazy loaded
 const AdminLayout = lazy(() => import('@components/admin/AdminLayout'));
@@ -101,6 +117,23 @@ const AdminPublicRoute = memo(({ children }: { children: React.ReactNode }) => {
 AdminPublicRoute.displayName = 'AdminPublicRoute';
 
 function App() {
+  // Preload critical routes after initial render
+  useEffect(() => {
+    // Use requestIdleCallback for better performance
+    const preloadCriticalRoutes = () => {
+      // Preload Feed and PostDetail as they're most commonly accessed
+      preloadRoutes.feed();
+      preloadRoutes.postDetail();
+    };
+
+    if ('requestIdleCallback' in window) {
+      (window as any).requestIdleCallback(preloadCriticalRoutes, { timeout: 3000 });
+    } else {
+      // Fallback: preload after 2 seconds
+      setTimeout(preloadCriticalRoutes, 2000);
+    }
+  }, []);
+
   return (
     <>
       <Suspense fallback={<PageLoader />}>

@@ -21,13 +21,59 @@ interface UsePaginationResult<T> {
   currentPage: number;
   isLoading: boolean;
   isPreloading: boolean;
+  isStale: boolean;
   error: string | null;
   goToPage: (page: number) => void;
   refresh: () => void;
 }
 
-// Cache for preloaded pages
-const pageCache = new Map<string, { data: any[]; timestamp: number }>();
+// LRU Cache implementation for better memory management
+class LRUCache {
+  private maxSize: number;
+  private cache = new Map<string, { data: any[]; timestamp: number; lastAccessed: number }>();
+
+  constructor(maxSize = 50) {
+    this.maxSize = maxSize;
+  }
+
+  get(key: string): any[] | null {
+    const item = this.cache.get(key);
+    if (!item || Date.now() - item.timestamp > CACHE_TTL) {
+      this.cache.delete(key);
+      return null;
+    }
+    // Update last accessed time for LRU
+    item.lastAccessed = Date.now();
+    return item.data;
+  }
+
+  set(key: string, data: any[]): void {
+    if (this.cache.size >= this.maxSize) {
+      // Remove least recently accessed entry
+      let lruKey = '';
+      let lruTime = Infinity;
+      for (const [k, v] of this.cache) {
+        if (v.lastAccessed < lruTime) {
+          lruTime = v.lastAccessed;
+          lruKey = k;
+        }
+      }
+      if (lruKey) this.cache.delete(lruKey);
+    }
+    this.cache.set(key, { data, timestamp: Date.now(), lastAccessed: Date.now() });
+  }
+
+  delete(key: string): void {
+    this.cache.delete(key);
+  }
+
+  clear(): void {
+    this.cache.clear();
+  }
+}
+
+// Use LRU cache with larger capacity
+const pageCache = new LRUCache(50);
 const CACHE_TTL = 60000; // 1 minute cache
 
 function getCacheKey(endpoint: string, page: number): string {
@@ -35,21 +81,11 @@ function getCacheKey(endpoint: string, page: number): string {
 }
 
 function getFromCache(key: string): any[] | null {
-  const cached = pageCache.get(key);
-  if (cached && Date.now() - cached.timestamp < CACHE_TTL) {
-    return cached.data;
-  }
-  pageCache.delete(key);
-  return null;
+  return pageCache.get(key);
 }
 
 function setCache(key: string, data: any[]): void {
-  // Limit cache size to prevent memory issues
-  if (pageCache.size > 10) {
-    const oldestKey = pageCache.keys().next().value;
-    if (oldestKey) pageCache.delete(oldestKey);
-  }
-  pageCache.set(key, { data, timestamp: Date.now() });
+  pageCache.set(key, data);
 }
 
 export function usePagination<T = any>({
@@ -63,10 +99,12 @@ export function usePagination<T = any>({
   const [currentPage, setCurrentPage] = useState(1);
   const [isLoading, setIsLoading] = useState(true);
   const [isPreloading, setIsPreloading] = useState(false);
+  const [isStale, setIsStale] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
   const abortControllerRef = useRef<AbortController | null>(null);
   const preloadAbortRef = useRef<AbortController | null>(null);
+  const previousEndpointRef = useRef<string>(endpoint);
 
   // Fetch a specific page
   const fetchPage = useCallback(
@@ -100,7 +138,10 @@ export function usePagination<T = any>({
 
       try {
         if (!isPreload) {
-          setIsLoading(true);
+          // Only show loading state if we don't have stale data to show
+          if (items.length === 0) {
+            setIsLoading(true);
+          }
           setError(null);
         } else {
           setIsPreloading(true);
@@ -123,6 +164,7 @@ export function usePagination<T = any>({
             ? transformData(response.posts)
             : (response.posts as T[]);
           setItems(transformed);
+          setIsStale(false); // Data is now fresh
 
           if (response.pagination) {
             setPagination(response.pagination);
@@ -157,8 +199,15 @@ export function usePagination<T = any>({
 
         // Skip if already cached
         if (!getFromCache(cacheKey)) {
-          // Small delay to prioritize current page load
-          setTimeout(() => fetchPage(nextPage, true), 300);
+          // Use requestIdleCallback for better performance, fallback to short timeout
+          if ('requestIdleCallback' in window) {
+            (window as any).requestIdleCallback(
+              () => fetchPage(nextPage, true),
+              { timeout: 1000 }
+            );
+          } else {
+            setTimeout(() => fetchPage(nextPage, true), 100);
+          }
         }
       }
     },
@@ -204,11 +253,17 @@ export function usePagination<T = any>({
     }
   }, [isLoading, currentPage, pagination, preloadAdjacentPage]);
 
-  // Reset to page 1 when endpoint changes
+  // Reset to page 1 when endpoint changes - STALE-WHILE-REVALIDATE pattern
   useEffect(() => {
-    setCurrentPage(1);
-    setItems([]);
-    setPagination(null);
+    // Only reset if endpoint actually changed
+    if (previousEndpointRef.current !== endpoint) {
+      previousEndpointRef.current = endpoint;
+      setCurrentPage(1);
+      // DON'T clear items - keep showing old data while new data loads
+      // This prevents the flash of empty state
+      setIsStale(true); // Mark current data as stale
+      // Pagination will be updated when new data arrives
+    }
   }, [endpoint]);
 
   return {
@@ -217,6 +272,7 @@ export function usePagination<T = any>({
     currentPage,
     isLoading,
     isPreloading,
+    isStale,
     error,
     goToPage,
     refresh,

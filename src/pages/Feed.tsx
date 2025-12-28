@@ -121,23 +121,12 @@ export default function Feed() {
   // Build the feed endpoint
   // DEFAULT: /feed shows TRENDING content for better engagement
   // Latest is available via /feed/latest filter
-  // For Kamakathalu mode (web-only), use special filtering
+  // For Kamakathalu mode (web-only), use dedicated Kamakathalu endpoint with tag filtering
   const feedEndpoint = useMemo(() => {
-    // If Kamakathalu mode is active (web-only), use Kamakathalu-specific endpoint
+    // If Kamakathalu mode is active (web-only), use Kamakathalu community endpoint
+    // This filters posts by Kamakathalu tags (sexual-confession, fantasy-kinks, etc.)
     if (contentType === 'kamakathalu' && !isTagPage) {
-      // Kamakathalu uses the same endpoints but with different filters
-      // Maps to trending, latest, most-relatable, or night-mode for "hot"
-      switch (kamakathaluFilter) {
-        case 'latest':
-          return '/feed/latest';
-        case 'relatable':
-          return '/feed/most-relatable';
-        case 'hot':
-          return '/feed/night-mode'; // Hot content uses night-mode endpoint (explicit content)
-        case 'trending':
-        default:
-          return '/feed/trending';
-      }
+      return `/feed/kamakathalu?sort=${kamakathaluFilter}`;
     }
 
     if (tag) {
@@ -160,12 +149,13 @@ export default function Feed() {
     }
   }, [filter, tag, tagSort, contentType, kamakathaluFilter, isTagPage]);
 
-  // Use pagination hook with preloading
+  // Use pagination hook with preloading and stale-while-revalidate
   const {
     items: posts,
     pagination,
     currentPage,
     isLoading,
+    isStale,
     error,
     goToPage,
     refresh,
@@ -432,8 +422,8 @@ export default function Feed() {
         </div>
       )}
 
-      {/* Loading State - Show skeletons for smooth transition */}
-      {isLoading && (
+      {/* Loading State - Show skeletons only when no stale data available */}
+      {isLoading && posts.length === 0 && (
         <div className="space-y-4">
           {[1, 2, 3, 4, 5].map((i) => (
             <PostSkeleton key={i} />
@@ -441,11 +431,26 @@ export default function Feed() {
         </div>
       )}
 
-      {/* Posts List with fade-in animation */}
-      {!isLoading && posts.length > 0 && (
-        <div className="space-y-4 animate-fade-in">
-          {posts.map((post) => (
-            <PostCard key={post._id} post={post} />
+      {/* Posts List - Shows immediately with stale data, updates when fresh data arrives */}
+      {posts.length > 0 && (
+        <div className={clsx(
+          'space-y-4',
+          isStale && 'opacity-70 transition-opacity duration-200'
+        )}>
+          {/* Stale data indicator - subtle loading bar at top */}
+          {isStale && (
+            <div className="h-0.5 bg-dark-800 rounded-full overflow-hidden">
+              <div className="h-full bg-primary-500 animate-pulse w-full" />
+            </div>
+          )}
+          {posts.map((post, index) => (
+            <div
+              key={post._id}
+              className="animate-fade-in"
+              style={{ animationDelay: `${Math.min(index * 30, 150)}ms` }}
+            >
+              <PostCard post={post} />
+            </div>
           ))}
         </div>
       )}

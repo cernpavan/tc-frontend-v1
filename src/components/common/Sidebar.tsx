@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react';
+import { useEffect } from 'react';
 import { NavLink } from 'react-router-dom';
 import {
   Flame,
@@ -10,8 +10,7 @@ import {
   Users,
 } from 'lucide-react';
 import { useAuthStore } from '@store/authStore';
-import { apiGet } from '@services/api';
-import { Community } from '../../types';
+import { useCommunitiesStore } from '@store/communitiesStore';
 
 const feedLinks = [
   { path: '/feed', icon: Clock, label: 'Latest', labelTe: 'తాజావి' },
@@ -37,20 +36,14 @@ export default function Sidebar() {
   const { user, isAuthenticated } = useAuthStore();
   const currentLanguage = isAuthenticated ? user?.language : (localStorage.getItem('guest-language') || 'english');
   const isTeluguLang = currentLanguage === 'telugu';
-  const [communities, setCommunities] = useState<Community[]>([]);
+
+  // Use global communities store - fetches once, caches forever
+  const { communities, fetchCommunities } = useCommunitiesStore();
 
   useEffect(() => {
-    const fetchCommunities = async () => {
-      try {
-        const response = await apiGet<{ communities: Community[] }>('/communities');
-        setCommunities(response.communities);
-      } catch (error) {
-        console.error('Failed to fetch communities:', error);
-      }
-    };
-
+    // This will only fetch if not already loaded
     fetchCommunities();
-  }, []);
+  }, [fetchCommunities]);
 
   return (
     <div className="p-4 space-y-6">
